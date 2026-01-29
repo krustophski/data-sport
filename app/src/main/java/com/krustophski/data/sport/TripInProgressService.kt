@@ -37,16 +37,12 @@ import com.krustophski.data.sport.events.TripProgressEvent
 import com.krustophski.data.sport.events.WheelCircumferenceEvent
 import com.krustophski.data.sport.util.SystemUtils
 import com.krustophski.data.sport.util.shouldCollectOnboardSensors
-import com.kvl.cyclotrack.vmix.FrameEngine
-import com.kvl.cyclotrack.vmix.LiveDataHub
 import com.kvl.cyclotrack.vmix.TimedValue
-import com.kvl.cyclotrack.vmix.VmixHttpServer
-import com.kvl.cyclotrack.vmix.VmixMapper
+import com.kvl.cyclotrack.vmix.VmixIntegrationManager
 import com.squareup.moshi.JsonDataException
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import dagger.hilt.android.AndroidEntryPoint
-import org.nanohttpd.protocols.http.NanoHTTPD
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -57,7 +53,6 @@ import okhttp3.Request
 import okio.IOException
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
-import java.io.IOException as IoException
 import javax.inject.Inject
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -114,10 +109,7 @@ class TripInProgressService @Inject constructor() :
     private val weatherUpdatePeriod = 5 * 60000
     private var running = false
     var bike: Bike? = null
-    private val vmixHub = LiveDataHub()
-    private val vmixFrameEngine = FrameEngine(vmixHub, 500L)
-    private var vmixServer: VmixHttpServer? = null
-    private val vmixPort = 8080
+    private val vmixHub = VmixIntegrationManager.hub
 
     @Inject
     lateinit var tripsRepository: TripsRepository
@@ -809,6 +801,10 @@ class TripInProgressService @Inject constructor() :
         var tripId: Long = -1
 
         clearState()
+        if (!VmixIntegrationManager.isRunning()) {
+            VmixIntegrationManager.startIfNeeded(applicationContext)
+            Log.i("VMIX", "VMIX integration started")
+        }
 
         lifecycleScope.launch(Dispatchers.IO) {
             if (bike == null) {
@@ -954,6 +950,7 @@ class TripInProgressService @Inject constructor() :
 
     private suspend fun end(tripId: Long) {
         Log.d(logTag, "Called end() with $tripId")
+        stopVmixIfRunning()
         var job: Job? = null
 
         tripId.takeIf { it >= 0 }?.let { id ->
@@ -983,7 +980,6 @@ class TripInProgressService @Inject constructor() :
 
         running = false
         clearState()
-        clearVmixHub()
         job?.join()
         stopSelf()
     }
@@ -1021,6 +1017,7 @@ class TripInProgressService @Inject constructor() :
                     resume(it.getLongExtra("tripId", -1))
 
                 getString(R.string.action_stop_trip_service) -> lifecycleScope.launch {
+                    stopVmixIfRunning()
                     end(it.getLongExtra("tripId", -1))
                 }
 
@@ -1044,7 +1041,6 @@ class TripInProgressService @Inject constructor() :
         EventBus.getDefault().register(this)
         initializeFromSharedPrefs()
         sharedPreferences.registerOnSharedPreferenceChangeListener(this)
-        startVmixServer()
     }
 
     private fun getAutoPauseRpmThreshold(key: String?) =
@@ -1098,50 +1094,15 @@ class TripInProgressService @Inject constructor() :
         EventBus.getDefault().unregister(this)
         bleService.disconnect()
         gpsService.stopListening()
-        stopVmixServer()
+        stopVmixIfRunning()
         Log.d(logTag, "onDestroy")
     }
 
-    private fun startVmixServer() {
-        if (vmixServer != null) {
-            return
+    private fun stopVmixIfRunning() {
+        if (VmixIntegrationManager.isRunning()) {
+            VmixIntegrationManager.stopIfRunning()
+            Log.i("VMIX", "VMIX integration stopped")
         }
-        vmixFrameEngine.start()
-        vmixServer = VmixHttpServer(
-            port = vmixPort,
-            getSnapshotJson = {
-                val frame = vmixFrameEngine.lastFrame() ?: vmixFrameEngine.snapshot()
-                VmixMapper.toVmixJson(frame)
-            },
-            getHistoryJson = { seconds ->
-                VmixMapper.toVmixJson(vmixFrameEngine.history(seconds))
-            }
-        )
-        try {
-            vmixServer?.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
-            Log.i(logTag, "vMix HTTP server started on port $vmixPort")
-        } catch (e: IoException) {
-            Log.w(logTag, "Failed to start vMix HTTP server", e)
-            vmixServer = null
-        }
-    }
-
-    private fun stopVmixServer() {
-        vmixServer?.stop()
-        vmixServer = null
-        vmixFrameEngine.shutdown()
-        clearVmixHub()
-    }
-
-    private fun clearVmixHub() {
-        vmixHub.lastGpsSpeed = null
-        vmixHub.lastBleSpeed = null
-        vmixHub.lastLocation = null
-        vmixHub.lastAltitudeM = null
-        vmixHub.lastDistanceM = null
-        vmixHub.lastHeartRate = null
-        vmixHub.lastCadence = null
-        vmixHub.lastPower = null
     }
 
     override fun onSharedPreferenceChanged(sharedPrefs: SharedPreferences?, key: String?) {
