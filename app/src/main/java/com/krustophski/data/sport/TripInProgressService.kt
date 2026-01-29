@@ -37,10 +37,16 @@ import com.krustophski.data.sport.events.TripProgressEvent
 import com.krustophski.data.sport.events.WheelCircumferenceEvent
 import com.krustophski.data.sport.util.SystemUtils
 import com.krustophski.data.sport.util.shouldCollectOnboardSensors
+import com.kvl.cyclotrack.vmix.FrameEngine
+import com.kvl.cyclotrack.vmix.LiveDataHub
+import com.kvl.cyclotrack.vmix.TimedValue
+import com.kvl.cyclotrack.vmix.VmixHttpServer
+import com.kvl.cyclotrack.vmix.VmixMapper
 import com.squareup.moshi.JsonDataException
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import dagger.hilt.android.AndroidEntryPoint
+import org.nanohttpd.protocols.http.NanoHTTPD
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -51,8 +57,10 @@ import okhttp3.Request
 import okio.IOException
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
+import java.io.IOException as IoException
 import javax.inject.Inject
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 fun Array<Split>.lastTwo(tripId: Long): Pair<Split, Split> {
     val lastTwo = this.drop(max(this.size - 2, 0))
@@ -106,6 +114,10 @@ class TripInProgressService @Inject constructor() :
     private val weatherUpdatePeriod = 5 * 60000
     private var running = false
     var bike: Bike? = null
+    private val vmixHub = LiveDataHub()
+    private val vmixFrameEngine = FrameEngine(vmixHub, 500L)
+    private var vmixServer: VmixHttpServer? = null
+    private val vmixPort = 8080
 
     @Inject
     lateinit var tripsRepository: TripsRepository
@@ -189,6 +201,8 @@ class TripInProgressService @Inject constructor() :
     @Subscribe
     fun onHrmData(event: HrmData) {
         hrmBpm = event.bpm
+        vmixHub.lastHeartRate =
+            event.bpm?.toInt()?.let { TimedValue(it, event.timestamp ?: SystemUtils.currentTimeMillis()) }
         thisHrmEventHandler(event)
     }
 
@@ -220,6 +234,8 @@ class TripInProgressService @Inject constructor() :
     @Subscribe
     fun onCadenceData(event: CadenceData) {
         cadence = event
+        vmixHub.lastCadence =
+            event.rpm?.roundToInt()?.let { TimedValue(it, event.timestamp ?: SystemUtils.currentTimeMillis()) }
         thisCadenceEventHandler(event)
     }
 
@@ -296,6 +312,15 @@ class TripInProgressService @Inject constructor() :
     @Subscribe
     fun onSpeedData(event: SpeedData) {
         speed = event
+        val circumference = userCircumference
+        vmixHub.lastBleSpeed = when {
+            event.rpm != null && circumference != null -> {
+                val speedMps = event.rpm.toDouble() * circumference / 60.0
+                TimedValue(speedMps, event.timestamp ?: SystemUtils.currentTimeMillis())
+            }
+
+            else -> null
+        }
         thisSpeedEventHandler(event)
     }
 
@@ -308,6 +333,7 @@ class TripInProgressService @Inject constructor() :
         if (newBike != bike) {
             bike = newBike
         }
+        newBike.weight?.let { vmixHub.bikeKg = it.toDouble() }
         newBike.id?.let { bikeId ->
             lifecycle.coroutineScope.launch {
                 tripsRepository.getNewest()?.let { trip ->
@@ -398,6 +424,10 @@ class TripInProgressService @Inject constructor() :
 
     private fun gpsObserver(tripId: Long): Observer<Location> = Observer { newLocation ->
         Log.d(logTag, "onChanged gps observer")
+        vmixHub.lastLocation =
+            TimedValue(newLocation.latitude to newLocation.longitude, newLocation.time)
+        vmixHub.lastAltitudeM = TimedValue(newLocation.altitude, newLocation.time)
+        vmixHub.lastGpsSpeed = TimedValue(newLocation.speed.toDouble(), newLocation.time)
         val newMeasurement = Measurements(
             tripId,
             LocationData(newLocation),
@@ -611,6 +641,7 @@ class TripInProgressService @Inject constructor() :
             }.let {
                 EventBus.getDefault().post(TripProgressEvent(it))
                 tripProgress = it
+                vmixHub.lastDistanceM = TimedValue(it.distance, SystemUtils.currentTimeMillis())
             }
     }
 
@@ -673,6 +704,7 @@ class TripInProgressService @Inject constructor() :
             EventBus.getDefault().post(TripProgressEvent(it))
             tripProgress = it
         }
+        tripProgress?.let { vmixHub.lastDistanceM = TimedValue(it.distance, SystemUtils.currentTimeMillis()) }
     }
 
     private lateinit var thisGpsObserver: Observer<Location>
@@ -951,6 +983,7 @@ class TripInProgressService @Inject constructor() :
 
         running = false
         clearState()
+        clearVmixHub()
         job?.join()
         stopSelf()
     }
@@ -1011,6 +1044,7 @@ class TripInProgressService @Inject constructor() :
         EventBus.getDefault().register(this)
         initializeFromSharedPrefs()
         sharedPreferences.registerOnSharedPreferenceChangeListener(this)
+        startVmixServer()
     }
 
     private fun getAutoPauseRpmThreshold(key: String?) =
@@ -1064,7 +1098,50 @@ class TripInProgressService @Inject constructor() :
         EventBus.getDefault().unregister(this)
         bleService.disconnect()
         gpsService.stopListening()
+        stopVmixServer()
         Log.d(logTag, "onDestroy")
+    }
+
+    private fun startVmixServer() {
+        if (vmixServer != null) {
+            return
+        }
+        vmixFrameEngine.start()
+        vmixServer = VmixHttpServer(
+            port = vmixPort,
+            getSnapshotJson = {
+                val frame = vmixFrameEngine.lastFrame() ?: vmixFrameEngine.snapshot()
+                VmixMapper.toVmixJson(frame)
+            },
+            getHistoryJson = { seconds ->
+                VmixMapper.toVmixJson(vmixFrameEngine.history(seconds))
+            }
+        )
+        try {
+            vmixServer?.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+            Log.i(logTag, "vMix HTTP server started on port $vmixPort")
+        } catch (e: IoException) {
+            Log.w(logTag, "Failed to start vMix HTTP server", e)
+            vmixServer = null
+        }
+    }
+
+    private fun stopVmixServer() {
+        vmixServer?.stop()
+        vmixServer = null
+        vmixFrameEngine.shutdown()
+        clearVmixHub()
+    }
+
+    private fun clearVmixHub() {
+        vmixHub.lastGpsSpeed = null
+        vmixHub.lastBleSpeed = null
+        vmixHub.lastLocation = null
+        vmixHub.lastAltitudeM = null
+        vmixHub.lastDistanceM = null
+        vmixHub.lastHeartRate = null
+        vmixHub.lastCadence = null
+        vmixHub.lastPower = null
     }
 
     override fun onSharedPreferenceChanged(sharedPrefs: SharedPreferences?, key: String?) {

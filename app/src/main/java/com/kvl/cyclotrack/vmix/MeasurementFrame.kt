@@ -1,0 +1,33 @@
+package com.kvl.cyclotrack.vmix
+
+data class MeasurementFrame(
+    val timestampMs: Long,
+    val frameId: Long,
+    val fps: Double,
+    val speed: Double,
+    val speedGps: Double?,
+    val speedBle: Double?,
+    val speedSource: String,
+    val speedSourceAgeMs: Long,
+    val speedConfidence: Int,
+    val lat: Double?,
+    val lon: Double?,
+    val gpsAgeMs: Long,
+    val gpsConfidence: Int,
+    val altitudeM: Double?,
+    val altitudeAgeMs: Long,
+    val altitudeConfidence: Int,
+    val gradeDeg: Double,
+    val distanceM: Double?,
+    val cadence: Int?,
+    val heartRate: Int?,
+    val hrAgeMs: Long,
+    val hrConfidence: Int,
+    val power: Int?,
+    val powerCal: Int,
+    val dqRaw: Int,
+    val dqSmooth: Int,
+    val dqState: String,
+    val dqReason: String,
+    val dqReasonShort: String
+)
