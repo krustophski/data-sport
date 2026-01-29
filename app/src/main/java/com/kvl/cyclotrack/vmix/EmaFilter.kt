@@ -13,4 +13,11 @@ class EmaFilter(private val alpha: Double) {
         }
         return value
     }
+
+    fun get(): Double? = if (initialized) value else null
+
+    fun reset() {
+        initialized = false
+        value = 0.0
+    }
 }

@@ -25,13 +25,8 @@ object VmixIntegrationManager {
             val engine = FrameEngine(hub, frameIntervalMs)
             val httpServer = VmixHttpServer(
                 port = port,
-                getSnapshotJson = {
-                    val frame = engine.lastFrame() ?: engine.snapshot()
-                    VmixMapper.toVmixJson(frame)
-                },
-                getHistoryJson = { seconds ->
-                    VmixMapper.toVmixJson(engine.history(seconds))
-                }
+                getSnapshotJson = { engine.getLastVmixSnapshotJson() },
+                getHistoryJson = { seconds -> engine.getHistoryJson(seconds) }
             )
             try {
                 engine.start()
@@ -40,7 +35,7 @@ object VmixIntegrationManager {
                 server = httpServer
                 running = true
             } catch (e: IOException) {
-                engine.shutdown()
+                engine.stop()
                 frameEngine = null
                 server = null
                 running = false
@@ -57,7 +52,7 @@ object VmixIntegrationManager {
                 server?.stop()
             } finally {
                 server = null
-                frameEngine?.shutdown()
+                frameEngine?.stop()
                 frameEngine = null
                 running = false
                 clearHub()

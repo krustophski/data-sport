@@ -1,159 +1,257 @@
 package com.kvl.cyclotrack.vmix
 
+import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import java.util.ArrayDeque
 import java.util.concurrent.Executors
-import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.atan
 import kotlin.math.max
-import kotlin.math.atan2
+import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
-class FrameEngine(private val hub: LiveDataHub, private val frameIntervalMs: Long) {
-    private val running = AtomicBoolean(false)
-    private val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
-        Thread(runnable, "vmix-frame-engine").apply { isDaemon = true }
-    }
-    private var future: ScheduledFuture<*>? = null
-    private val frameId = AtomicLong(0)
-    private val lastFrameRef = AtomicReference<MeasurementFrame?>(null)
-    private var lastFrameTimeMs = 0L
-    private val fpsFilter = EmaFilter(0.2)
-    private val dqFilter = EmaFilter(0.2)
-    private val gradeFilter = EmaFilter(0.15)
-    private var lastGradeDistanceM: Double? = null
-    private var lastGradeAltitudeM: Double? = null
-    private val history = ArrayDeque<MeasurementFrame>()
+class FrameEngine(
+    private val hub: LiveDataHub,
+    private val frameIntervalMs: Long
+) {
+    private val lock = Any()
     private val historyLock = Any()
-    private val historyMaxMs = 120_000L
+    private val gson: Gson = GsonBuilder().serializeNulls().create()
 
-    var onFrame: ((MeasurementFrame) -> Unit)? = null
+    private var executor: ScheduledExecutorService? = null
+    private var running = false
+
+    private var frameId = 0L
+    private var lastFrameTimeMs = 0L
+
+    private val fpsEma = EmaFilter(0.25)
+    private val speedEma = EmaFilter(0.30)
+    private val speedGpsEma = EmaFilter(0.25)
+    private val altitudeEma = EmaFilter(0.10)
+    private val dqEma = EmaFilter(0.20)
+
+    private var dqState: String = DATA_QUALITY_NODATA
+    private var lastAltForGrade: Double? = null
+    private var lastDistanceForGrade: Double? = null
+    private var internalDistanceM = 0.0
+
+    private val history = ArrayDeque<MeasurementFrame>(HISTORY_MAX_FRAMES)
+
+    @Volatile private var lastFrame: MeasurementFrame? = null
+    @Volatile private var lastVmixJsonString: String = "[]"
 
     fun start() {
-        if (!running.compareAndSet(false, true)) {
-            return
+        synchronized(lock) {
+            if (running) return
+            resetState()
+            val scheduler = Executors.newSingleThreadScheduledExecutor()
+            executor = scheduler
+            running = true
+            scheduler.scheduleAtFixedRate(
+                { tickSafe() },
+                0L,
+                frameIntervalMs,
+                TimeUnit.MILLISECONDS
+            )
         }
-        future = executor.scheduleAtFixedRate(
-            {
-                try {
-                    val frame = buildFrame()
-                    lastFrameRef.set(frame)
-                    onFrame?.invoke(frame)
-                } catch (_: Throwable) {
-                    // Keep scheduler alive even if a frame build fails.
-                }
-            },
-            0L,
-            frameIntervalMs,
-            TimeUnit.MILLISECONDS
-        )
     }
 
     fun stop() {
-        if (!running.compareAndSet(true, false)) {
-            return
+        synchronized(lock) {
+            if (!running) return
+            running = false
+            executor?.shutdownNow()
+            executor = null
         }
-        future?.cancel(false)
-        future = null
     }
 
-    fun shutdown() {
-        stop()
-        executor.shutdownNow()
+    fun getLastVmixSnapshotJson(): String = lastVmixJsonString
+
+    fun getHistoryJson(seconds: Int): String {
+        val clampedSeconds = seconds.coerceIn(1, HISTORY_SECONDS)
+        val maxFrames = ((clampedSeconds * 1000L) / frameIntervalMs).toInt().coerceAtLeast(1)
+        val frames = synchronized(historyLock) {
+            if (history.isEmpty()) {
+                emptyList()
+            } else {
+                history.toList().takeLast(maxFrames)
+            }
+        }
+        val historyFrames = frames.map {
+            HistoryFrame(
+                ts = it.timestampMs,
+                speed = it.speed,
+                hr = it.heartRate,
+                dq = it.dqSmooth,
+                grade = it.gradeDeg,
+                lat = it.lat,
+                lon = it.lon
+            )
+        }
+        return gson.toJson(HistoryResponse(clampedSeconds, historyFrames))
     }
 
-    fun lastFrame(): MeasurementFrame? = lastFrameRef.get()
-
-    fun snapshot(): MeasurementFrame = buildFrame()
-
-    fun history(seconds: Int): List<MeasurementFrame> {
-        val cutoff = System.currentTimeMillis() - seconds.coerceAtLeast(0) * 1000L
+    private fun resetState() {
+        frameId = 0L
+        lastFrameTimeMs = 0L
+        fpsEma.reset()
+        speedEma.reset()
+        speedGpsEma.reset()
+        altitudeEma.reset()
+        dqEma.reset()
+        dqState = DATA_QUALITY_NODATA
+        lastAltForGrade = null
+        lastDistanceForGrade = null
+        internalDistanceM = 0.0
         synchronized(historyLock) {
-            return history.filter { it.timestampMs >= cutoff }
+            history.clear()
+        }
+        lastFrame = null
+        lastVmixJsonString = "[]"
+    }
+
+    private fun tickSafe() {
+        try {
+            tick()
+        } catch (_: Throwable) {
+            // Keep engine alive even if something goes wrong in a single frame.
         }
     }
 
-    private fun buildFrame(): MeasurementFrame {
-        val now = System.currentTimeMillis()
-        val frameId = frameId.incrementAndGet()
-        val fps = calculateFps(now)
+    private fun tick() {
+        val nowMs = System.currentTimeMillis()
+        val dtMs = if (lastFrameTimeMs > 0L) nowMs - lastFrameTimeMs else 0L
+        lastFrameTimeMs = nowMs
+        val dtSeconds = if (dtMs > 0L) dtMs / 1000.0 else 0.0
 
-        val gpsSpeed = hub.lastGpsSpeed
-        val bleSpeed = hub.lastBleSpeed
-        val gpsSpeedAge = ageMs(gpsSpeed?.timestampMs, now)
-        val bleSpeedAge = ageMs(bleSpeed?.timestampMs, now)
-        val hasGps = gpsSpeed != null
-        val hasBle = bleSpeed != null
+        val fpsRaw = if (dtMs > 0L) 1000.0 / dtMs else 0.0
+        val fps = fpsEma.update(fpsRaw)
 
-        val useGps = when {
-            hasGps && !hasBle -> true
-            !hasGps && hasBle -> false
-            hasGps && hasBle -> gpsSpeedAge <= bleSpeedAge
-            else -> false
-        }
+        val lastGpsSpeed = hub.lastGpsSpeed
+        val lastBleSpeed = hub.lastBleSpeed
+        val lastLocation = hub.lastLocation
+        val lastAltitude = hub.lastAltitudeM
+        val lastDistance = hub.lastDistanceM
+        val lastHeartRate = hub.lastHeartRate
+        val lastCadence = hub.lastCadence
+        val lastPower = hub.lastPower
+
+        val gpsAgeMs = ageMs(nowMs, lastLocation)
+        val gpsConfidence = confidencePct(gpsAgeMs, GPS_MAX_AGE_MS)
+
+        val altitudeAgeMs = ageMs(nowMs, lastAltitude)
+        val altitudeConfidence = confidencePct(altitudeAgeMs, ALT_MAX_AGE_MS)
+
+        val hrAgeMs = ageMs(nowMs, lastHeartRate)
+        val hrConfidence = confidencePct(hrAgeMs, HR_MAX_AGE_MS)
+
+        val bleAgeMs = ageMs(nowMs, lastBleSpeed)
+        val gpsSpeedAgeMs = ageMs(nowMs, lastGpsSpeed)
+
         val speedSource = when {
-            useGps && hasGps -> "gps"
-            !useGps && hasBle -> "ble"
-            else -> "none"
+            lastBleSpeed != null && bleAgeMs <= SPEED_BLE_MAX_AGE_MS -> SPEED_SOURCE_BLE
+            lastGpsSpeed != null && gpsSpeedAgeMs <= SPEED_GPS_MAX_AGE_MS -> SPEED_SOURCE_GPS
+            else -> SPEED_SOURCE_NONE
         }
-        val speedGps = gpsSpeed?.value
-        val speedBle = bleSpeed?.value
-        val speed = when (speedSource) {
-            "gps" -> speedGps ?: 0.0
-            "ble" -> speedBle ?: 0.0
-            else -> 0.0
-        }
+
         val speedSourceAgeMs = when (speedSource) {
-            "gps" -> gpsSpeedAge
-            "ble" -> bleSpeedAge
+            SPEED_SOURCE_BLE -> bleAgeMs
+            SPEED_SOURCE_GPS -> gpsSpeedAgeMs
             else -> -1L
         }
-        val speedConfidence = confidence(speedSourceAgeMs)
 
-        val location = hub.lastLocation
-        val lat = location?.value?.first
-        val lon = location?.value?.second
-        val gpsAgeMs = ageMs(location?.timestampMs, now)
-        val gpsConfidence = confidence(gpsAgeMs)
+        val speedSourceMaxAge = when (speedSource) {
+            SPEED_SOURCE_BLE -> SPEED_BLE_MAX_AGE_MS
+            SPEED_SOURCE_GPS -> SPEED_GPS_MAX_AGE_MS
+            else -> 0L
+        }
 
-        val altitude = hub.lastAltitudeM
-        val altitudeM = altitude?.value
-        val altitudeAgeMs = ageMs(altitude?.timestampMs, now)
-        val altitudeConfidence = confidence(altitudeAgeMs)
+        val speedRaw = when (speedSource) {
+            SPEED_SOURCE_BLE -> lastBleSpeed?.value ?: 0.0
+            SPEED_SOURCE_GPS -> lastGpsSpeed?.value ?: 0.0
+            else -> 0.0
+        }
+        val speed = speedEma.update(speedRaw)
 
-        val distance = hub.lastDistanceM
-        val distanceM = distance?.value
-        val distanceAgeMs = ageMs(distance?.timestampMs, now)
+        val speedGps = lastGpsSpeed?.value?.let { speedGpsEma.update(it) }
+        val speedBle = lastBleSpeed?.value
 
-        val cadence = hub.lastCadence
-        val cadenceValue = cadence?.value
+        val speedConfidence = if (speedSource == SPEED_SOURCE_NONE) {
+            0
+        } else {
+            confidencePct(speedSourceAgeMs, speedSourceMaxAge)
+        }
 
-        val heartRate = hub.lastHeartRate
-        val heartRateValue = heartRate?.value
-        val hrAgeMs = ageMs(heartRate?.timestampMs, now)
-        val hrConfidence = confidence(hrAgeMs)
+        val lat = lastLocation?.value?.first
+        val lon = lastLocation?.value?.second
 
-        val power = hub.lastPower
-        val powerValue = power?.value
+        val altitudeSmoothed = if (lastAltitude != null) {
+            altitudeEma.update(lastAltitude.value)
+        } else {
+            altitudeEma.get()
+        }
 
-        val gradeDeg = computeGradeDeg(
-            distanceM = distanceM,
-            distanceAgeMs = distanceAgeMs,
-            altitudeM = altitudeM,
-            altitudeAgeMs = altitudeAgeMs
+        val cadence = lastCadence?.value
+        val heartRate = lastHeartRate?.value
+        val power = lastPower?.value
+
+        val distanceM = lastDistance?.value
+        val speedMps = speed / 3.6
+        val deltaDistM = if (distanceM != null) {
+            val prev = lastDistanceForGrade
+            lastDistanceForGrade = distanceM
+            internalDistanceM = distanceM
+            if (prev == null) 0.0 else distanceM - prev
+        } else {
+            val delta = if (dtSeconds > 0.0) speedMps * dtSeconds else 0.0
+            internalDistanceM += delta
+            lastDistanceForGrade = internalDistanceM
+            delta
+        }
+
+        val gradeDeg = if (deltaDistM >= 1.0 && altitudeSmoothed != null && lastAltForGrade != null) {
+            Math.toDegrees(atan((altitudeSmoothed - (lastAltForGrade ?: altitudeSmoothed)) / deltaDistM))
+        } else {
+            0.0
+        }
+        if (altitudeSmoothed != null) {
+            lastAltForGrade = altitudeSmoothed
+        }
+
+        val powerCal = calculatePowerCal(speedMps, gradeDeg, hub.riderKg + hub.bikeKg)
+
+        var dqRaw = (0.45 * speedConfidence + 0.25 * gpsConfidence + 0.20 * altitudeConfidence + 0.10 * hrConfidence)
+            .roundToInt()
+        dqRaw = when {
+            speedConfidence < 10 -> min(dqRaw, 10)
+            speedConfidence < 30 -> min(dqRaw, 30)
+            else -> dqRaw
+        }.coerceIn(0, 100)
+
+        val dqSmooth = dqEma.update(dqRaw.toDouble()).roundToInt().coerceIn(0, 100)
+        dqState = updateDqState(dqState, dqSmooth)
+
+        val dqReason = buildDqReason(
+            dqState = dqState,
+            speedSource = speedSource,
+            speedSourceAgeMs = speedSourceAgeMs,
+            speedSourceMaxAgeMs = speedSourceMaxAge,
+            speedConfidence = speedConfidence,
+            gpsAgeMs = gpsAgeMs,
+            gpsConfidence = gpsConfidence,
+            altitudeAgeMs = altitudeAgeMs,
+            altitudeConfidence = altitudeConfidence,
+            hrAgeMs = hrAgeMs,
+            hrConfidence = hrConfidence
         )
 
-        val dqRaw = computeDqRaw(speedConfidence, gpsConfidence, hrConfidence, altitudeConfidence)
-        val dqSmooth = dqFilter.update(dqRaw.toDouble()).roundToInt()
-        val dqReason = computeDqReason(speedConfidence, gpsConfidence, hrConfidence, altitudeConfidence)
-        val dqReasonShort = computeDqReasonShort(dqReason)
-        val dqState = computeDqState(dqRaw)
+        val dqReasonShort = buildDqReasonShort(dqState, dqReason)
 
         val frame = MeasurementFrame(
-            timestampMs = now,
-            frameId = frameId,
+            timestampMs = nowMs,
+            frameId = frameId++,
             fps = fps,
             speed = speed,
             speedGps = speedGps,
@@ -165,17 +263,17 @@ class FrameEngine(private val hub: LiveDataHub, private val frameIntervalMs: Lon
             lon = lon,
             gpsAgeMs = gpsAgeMs,
             gpsConfidence = gpsConfidence,
-            altitudeM = altitudeM,
+            altitudeM = altitudeSmoothed,
             altitudeAgeMs = altitudeAgeMs,
             altitudeConfidence = altitudeConfidence,
             gradeDeg = gradeDeg,
             distanceM = distanceM,
-            cadence = cadenceValue,
-            heartRate = heartRateValue,
+            cadence = cadence,
+            heartRate = heartRate,
             hrAgeMs = hrAgeMs,
             hrConfidence = hrConfidence,
-            power = powerValue,
-            powerCal = 0,
+            power = power,
+            powerCal = powerCal,
             dqRaw = dqRaw,
             dqSmooth = dqSmooth,
             dqState = dqState,
@@ -185,132 +283,135 @@ class FrameEngine(private val hub: LiveDataHub, private val frameIntervalMs: Lon
 
         synchronized(historyLock) {
             history.addLast(frame)
-            val cutoff = now - historyMaxMs
-            while (history.isNotEmpty() && history.first().timestampMs < cutoff) {
+            while (history.size > HISTORY_MAX_FRAMES) {
                 history.removeFirst()
             }
         }
 
-        return frame
+        lastFrame = frame
+        lastVmixJsonString = VmixMapper.toVmixJson(frame)
     }
 
-    private fun calculateFps(now: Long): Double {
-        val last = lastFrameTimeMs
-        lastFrameTimeMs = now
-        if (last <= 0L) {
-            return 1000.0 / max(1L, frameIntervalMs)
-        }
-        val delta = max(1L, now - last)
-        val instantFps = 1000.0 / delta.toDouble()
-        return fpsFilter.update(instantFps)
+    private fun calculatePowerCal(speedMps: Double, gradeDeg: Double, totalMassKg: Double): Int {
+        if (speedMps <= 0.0 || totalMassKg <= 0.0) return 0
+        val rho = 1.226
+        val cdA = 0.32
+        val crr = 0.005
+        val g = 9.80665
+        val gradeRad = Math.toRadians(gradeDeg)
+
+        val paero = 0.5 * rho * cdA * speedMps * speedMps * speedMps
+        val proll = crr * totalMassKg * g * speedMps
+        val pgrav = totalMassKg * g * sin(gradeRad) * speedMps
+        return max(0.0, paero + proll + pgrav).roundToInt()
     }
 
-    private fun ageMs(timestampMs: Long?, now: Long): Long {
-        if (timestampMs == null) return -1L
-        return max(0L, now - timestampMs)
+    private fun updateDqState(current: String, dqSmooth: Int): String = when (current) {
+        DATA_QUALITY_OK -> if (dqSmooth <= 75) DATA_QUALITY_WARN else DATA_QUALITY_OK
+        DATA_QUALITY_WARN -> when {
+            dqSmooth >= 85 -> DATA_QUALITY_OK
+            dqSmooth <= 55 -> DATA_QUALITY_BAD
+            else -> DATA_QUALITY_WARN
+        }
+        DATA_QUALITY_BAD -> when {
+            dqSmooth >= 65 -> DATA_QUALITY_WARN
+            dqSmooth <= 10 -> DATA_QUALITY_NODATA
+            else -> DATA_QUALITY_BAD
+        }
+        DATA_QUALITY_NODATA -> if (dqSmooth >= 20) DATA_QUALITY_BAD else DATA_QUALITY_NODATA
+        else -> DATA_QUALITY_NODATA
     }
 
-    private fun confidence(ageMs: Long): Int {
-        if (ageMs < 0) return 0
-        return when {
-            ageMs <= 1000L -> 100
-            ageMs <= 3000L -> 75
-            ageMs <= 5000L -> 50
-            ageMs <= 10_000L -> 25
-            else -> 0
-        }.coerceIn(0, 100)
-    }
-
-    private fun computeGradeDeg(
-        distanceM: Double?,
-        distanceAgeMs: Long,
-        altitudeM: Double?,
-        altitudeAgeMs: Long
-    ): Double {
-        if (distanceM == null || altitudeM == null) {
-            return 0.0
-        }
-        if (distanceAgeMs < 0 || altitudeAgeMs < 0) {
-            return 0.0
-        }
-        if (distanceAgeMs > 10_000L || altitudeAgeMs > 10_000L) {
-            return 0.0
-        }
-        val lastDistance = lastGradeDistanceM
-        val lastAltitude = lastGradeAltitudeM
-        lastGradeDistanceM = distanceM
-        lastGradeAltitudeM = altitudeM
-        if (lastDistance == null || lastAltitude == null) {
-            return 0.0
-        }
-        val deltaDistance = distanceM - lastDistance
-        val deltaAltitude = altitudeM - lastAltitude
-        if (deltaDistance <= 0.5) {
-            return gradeFilter.update(0.0)
-        }
-        val gradeRad = atan2(deltaAltitude, deltaDistance)
-        val gradeDeg = gradeRad * 180.0 / Math.PI
-        return gradeFilter.update(gradeDeg)
-    }
-
-    private fun computeDqRaw(
+    private fun buildDqReason(
+        dqState: String,
+        speedSource: String,
+        speedSourceAgeMs: Long,
+        speedSourceMaxAgeMs: Long,
         speedConfidence: Int,
+        gpsAgeMs: Long,
         gpsConfidence: Int,
-        hrConfidence: Int,
-        altitudeConfidence: Int
-    ): Int {
-        val weighted = listOf(
-            speedConfidence to 4,
-            gpsConfidence to 3,
-            hrConfidence to 2,
-            altitudeConfidence to 1
-        )
-        val totalWeight = weighted.sumOf { it.second }
-        val sum = weighted.sumOf { it.first * it.second }
-        return if (totalWeight == 0) 0 else (sum / totalWeight)
-    }
-
-    private fun computeDqReason(
-        speedConfidence: Int,
-        gpsConfidence: Int,
-        hrConfidence: Int,
-        altitudeConfidence: Int
+        altitudeAgeMs: Long,
+        altitudeConfidence: Int,
+        hrAgeMs: Long,
+        hrConfidence: Int
     ): String {
-        return when {
-            speedConfidence == 0 && gpsConfidence == 0 -> "no_speed_or_gps"
-            speedConfidence == 0 -> "no_speed"
-            gpsConfidence == 0 -> "no_gps"
-            hrConfidence == 0 -> "no_hr"
-            altitudeConfidence == 0 -> "no_altitude"
-            speedConfidence < 50 -> "stale_speed"
-            gpsConfidence < 50 -> "stale_gps"
-            hrConfidence < 50 -> "stale_hr"
-            altitudeConfidence < 50 -> "stale_altitude"
-            else -> "fresh"
-        }
+        if (dqState == DATA_QUALITY_NODATA) return DATA_QUALITY_NODATA
+
+        val reasons = mutableListOf<String>()
+
+        if (speedSource == SPEED_SOURCE_NONE) reasons.add("SPEED_NONE")
+        if (speedSource != SPEED_SOURCE_NONE && speedSourceAgeMs > speedSourceMaxAgeMs) reasons.add("SPEED_STALE")
+        if (speedConfidence < 30) reasons.add("SPEED_LOW_CONF")
+
+        if (gpsAgeMs < 0L) reasons.add("GPS_NONE")
+        if (gpsAgeMs > GPS_MAX_AGE_MS) reasons.add("GPS_STALE")
+        if (gpsConfidence < 30) reasons.add("GPS_LOW_CONF")
+
+        if (altitudeAgeMs < 0L) reasons.add("ALT_NONE")
+        if (altitudeAgeMs > ALT_MAX_AGE_MS) reasons.add("ALT_STALE")
+        if (altitudeConfidence < 30) reasons.add("ALT_LOW_CONF")
+
+        if (hrAgeMs < 0L) reasons.add("HR_NONE")
+        if (hrAgeMs > HR_MAX_AGE_MS) reasons.add("HR_STALE")
+        if (hrConfidence < 30) reasons.add("HR_LOW_CONF")
+
+        return if (reasons.isEmpty()) "OK" else reasons.joinToString("|")
     }
 
-    private fun computeDqReasonShort(reason: String): String {
-        return when (reason) {
-            "no_speed_or_gps" -> "NO_SPEED_GPS"
-            "no_speed" -> "NO_SPEED"
-            "no_gps" -> "NO_GPS"
-            "no_hr" -> "NO_HR"
-            "no_altitude" -> "NO_ALT"
-            "stale_speed" -> "STALE_SPEED"
-            "stale_gps" -> "STALE_GPS"
-            "stale_hr" -> "STALE_HR"
-            "stale_altitude" -> "STALE_ALT"
+    private fun buildDqReasonShort(dqState: String, dqReason: String): String {
+        if (dqState == DATA_QUALITY_NODATA) return DATA_QUALITY_NODATA
+        val parts = dqReason.split("|")
+        return when {
+            parts.any { it.startsWith("SPEED_") } -> "SPEED"
+            parts.any { it.startsWith("GPS_") } -> "GPS"
+            parts.any { it.startsWith("ALT_") } -> "ALT"
+            parts.any { it.startsWith("HR_") } -> "HR"
             else -> "OK"
         }
     }
 
-    private fun computeDqState(dqRaw: Int): String {
-        return when {
-            dqRaw >= 80 -> "good"
-            dqRaw >= 50 -> "ok"
-            dqRaw >= 20 -> "stale"
-            else -> "none"
-        }
+    private fun <T> ageMs(nowMs: Long, timedValue: TimedValue<T>?): Long {
+        return if (timedValue == null) -1L else nowMs - timedValue.timestampMs
+    }
+
+    private fun confidencePct(ageMs: Long, maxAgeMs: Long): Int {
+        if (ageMs < 0L || maxAgeMs <= 0L) return 0
+        val ratio = 1.0 - (ageMs.toDouble() / maxAgeMs.toDouble())
+        return (ratio * 100.0).roundToInt().coerceIn(0, 100)
+    }
+
+    private data class HistoryFrame(
+        val ts: Long,
+        val speed: Double,
+        val hr: Int?,
+        val dq: Int,
+        val grade: Double,
+        val lat: Double?,
+        val lon: Double?
+    )
+
+    private data class HistoryResponse(
+        val seconds: Int,
+        val frames: List<HistoryFrame>
+    )
+
+    companion object {
+        private const val HISTORY_SECONDS = 60
+        private const val HISTORY_MAX_FRAMES = 120
+
+        private const val SPEED_BLE_MAX_AGE_MS = 1500L
+        private const val SPEED_GPS_MAX_AGE_MS = 2500L
+        private const val GPS_MAX_AGE_MS = 2500L
+        private const val ALT_MAX_AGE_MS = 2500L
+        private const val HR_MAX_AGE_MS = 3000L
+
+        private const val SPEED_SOURCE_BLE = "BLE"
+        private const val SPEED_SOURCE_GPS = "GPS"
+        private const val SPEED_SOURCE_NONE = "NONE"
+
+        private const val DATA_QUALITY_OK = "OK"
+        private const val DATA_QUALITY_WARN = "WARN"
+        private const val DATA_QUALITY_BAD = "BAD"
+        private const val DATA_QUALITY_NODATA = "NODATA"
     }
 }
