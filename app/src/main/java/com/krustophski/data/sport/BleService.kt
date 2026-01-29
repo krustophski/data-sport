@@ -22,14 +22,17 @@ import androidx.lifecycle.coroutineScope
 import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.analytics.logEvent
 import com.google.firebase.crashlytics.FirebaseCrashlytics
+import com.kvl.cyclotrack.vmix.VmixIntegrationManager
 import com.krustophski.data.sport.events.BluetoothActionEvent
 import com.krustophski.data.sport.events.ConnectedBikeEvent
 import com.krustophski.data.sport.util.SystemUtils
 import com.krustophski.data.sport.util.getIntValue
+import com.krustophski.data.sport.util.getUserCircumferenceOrNull
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import org.greenrobot.eventbus.EventBus
 import javax.inject.Inject
+import kotlin.math.roundToInt
 
 data class HrmData(
     val batteryLevel: Byte?,
@@ -323,6 +326,8 @@ class BleService @Inject constructor(
                 Log.d("DEBUG", characteristicValue.toString())
                 val heartRate = characteristicValue.getIntValue(format, 1) ?: 0
                 Log.d(logTag, String.format("Received heart rate: %d", heartRate))
+                val now = System.currentTimeMillis()
+                VmixIntegrationManager.hub.setHeartRate(heartRate, now)
                 HrmData(
                     batteryLevel = hrmSensor.batteryLevel,
                     bpm = heartRate.toShort(),
@@ -407,6 +412,12 @@ class BleService @Inject constructor(
                                 logTag,
                                 "Speed sensor: $revolutionCount :: $lastEvent :: $rpm"
                             )
+                            val now = System.currentTimeMillis()
+                            val circumferenceM =
+                                userCircumferenceToMeters(connectedBike?.wheelCircumference)
+                                    ?: getUserCircumferenceOrNull(context)
+                            val speedMps = circumferenceM?.let { rpm.toDouble() / 60.0 * it }
+                            speedMps?.let { VmixIntegrationManager.hub.setBleSpeed(it, now) }
                             if (connectedBike == null && rpm > 0) {
                                 connectBike(gatt)
                             }
@@ -454,6 +465,8 @@ class BleService @Inject constructor(
                                 logTag,
                                 "Cadence sensor update: $revolutionCount :: $lastEvent :: $rpm"
                             )
+                            val now = System.currentTimeMillis()
+                            VmixIntegrationManager.hub.setCadence(rpm.roundToInt(), now)
                             if (connectedBike == null && rpm > 0) {
                                 connectBike(gatt)
                             }

@@ -193,8 +193,9 @@ class TripInProgressService @Inject constructor() :
     @Subscribe
     fun onHrmData(event: HrmData) {
         hrmBpm = event.bpm
-        vmixHub.lastHeartRate =
-            event.bpm?.toInt()?.let { TimedValue(it, event.timestamp ?: SystemUtils.currentTimeMillis()) }
+        event.bpm?.toInt()?.let {
+            vmixHub.setHeartRate(it, event.timestamp ?: SystemUtils.currentTimeMillis())
+        }
         thisHrmEventHandler(event)
     }
 
@@ -226,8 +227,9 @@ class TripInProgressService @Inject constructor() :
     @Subscribe
     fun onCadenceData(event: CadenceData) {
         cadence = event
-        vmixHub.lastCadence =
-            event.rpm?.roundToInt()?.let { TimedValue(it, event.timestamp ?: SystemUtils.currentTimeMillis()) }
+        event.rpm?.roundToInt()?.let {
+            vmixHub.setCadence(it, event.timestamp ?: SystemUtils.currentTimeMillis())
+        }
         thisCadenceEventHandler(event)
     }
 
@@ -305,13 +307,12 @@ class TripInProgressService @Inject constructor() :
     fun onSpeedData(event: SpeedData) {
         speed = event
         val circumference = userCircumference
-        vmixHub.lastBleSpeed = when {
+        when {
             event.rpm != null && circumference != null -> {
                 val speedMps = event.rpm.toDouble() * circumference / 60.0
-                TimedValue(speedMps, event.timestamp ?: SystemUtils.currentTimeMillis())
+                vmixHub.setBleSpeed(speedMps, event.timestamp ?: SystemUtils.currentTimeMillis())
             }
-
-            else -> null
+            else -> Unit
         }
         thisSpeedEventHandler(event)
     }
@@ -416,10 +417,13 @@ class TripInProgressService @Inject constructor() :
 
     private fun gpsObserver(tripId: Long): Observer<Location> = Observer { newLocation ->
         Log.d(logTag, "onChanged gps observer")
-        vmixHub.lastLocation =
-            TimedValue(newLocation.latitude to newLocation.longitude, newLocation.time)
-        vmixHub.lastAltitudeM = TimedValue(newLocation.altitude, newLocation.time)
-        vmixHub.lastGpsSpeed = TimedValue(newLocation.speed.toDouble(), newLocation.time)
+        vmixHub.setGps(
+            lat = newLocation.latitude,
+            lon = newLocation.longitude,
+            altitudeM = newLocation.altitude,
+            speedMps = newLocation.speed,
+            nowMs = newLocation.time
+        )
         val newMeasurement = Measurements(
             tripId,
             LocationData(newLocation),

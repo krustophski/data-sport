@@ -12,6 +12,7 @@ import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import com.kvl.cyclotrack.vmix.VmixIntegrationManager
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -25,6 +26,14 @@ class GpsService @Inject constructor(context: Application) : LiveData<Location>(
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
             Log.v(logTag, "New location result")
+            val now = System.currentTimeMillis()
+            VmixIntegrationManager.hub.setGps(
+                lat = location.latitude,
+                lon = location.longitude,
+                altitudeM = location.altitude,
+                speedMps = location.speed,
+                nowMs = now
+            )
             Log.v(
                 logTag,
                 "location: ${location.latitude},${location.longitude} +/- ${location.accuracy}m"
