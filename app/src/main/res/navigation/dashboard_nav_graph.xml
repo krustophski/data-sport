@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/dashboard_nav_graph"
+    app:startDestination="@id/TripInProgressFragment">
+    <activity
+        android:id="@+id/MainActivity"
+        android:name="com.krustophski.data.sport.MainActivity"
+        android:label="MainActivity"
+        tools:layout="@layout/activity_main" />
+    <activity
+        android:id="@+id/TripDetailsActivity"
+        android:name="com.krustophski.data.sport.TripDetailsActivity"
+        android:label="TripDetailsActivity"
+        tools:layout="@layout/activity_trip_details" />
+    <fragment
+        android:id="@+id/TripInProgressFragment"
+        android:name="com.krustophski.data.sport.TripInProgressFragment"
+        android:label="Dashboard"
+        tools:layout="@layout/fragment_trip_in_progress">
+        <argument
+            android:name="tripId"
+            android:defaultValue="-1L"
+            app:argType="long" />
+        <action
+            android:id="@+id/action_finish_trip"
+            app:destination="@id/TripDetailsActivity">
+            <argument
+                android:name="tripId"
+                android:defaultValue="-1L"
+                app:argType="long" />
+        </action>
+        <action
+            android:id="@+id/action_back_to_summaries"
+            app:destination="@id/MainActivity"
+            app:launchSingleTop="true" />
+    </fragment>
+</navigation>

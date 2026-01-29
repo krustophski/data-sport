@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".EditTripFragment"
+    android:id="@+id/EditTripFragment"
+    android:layout_margin="12dp">
+
+    <TextView
+        android:text="Edit ride"
+        android:id="@+id/edit_trip_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/edit_trip_date"
+        app:layout_constraintStart_toStartOf="parent"
+        android:textSize="24sp" />
+
+    <TextView
+        android:id="@+id/edit_trip_date"
+        app:layout_constraintTop_toBottomOf="@id/edit_trip_title"
+        app:layout_constraintBottom_toTopOf="@id/edit_trip_name_layout"
+        app:layout_constraintStart_toStartOf="@id/edit_trip_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content" />
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/edit_trip_name_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="30dp"
+        app:layout_constraintTop_toBottomOf="@id/edit_trip_date"
+        app:layout_constraintBottom_toTopOf="@id/edit_trip_notes_layout"
+        app:layout_constraintStart_toStartOf="parent"
+        android:hint="Trip name">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/edit_trip_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ems="10"
+            android:inputType="textNoSuggestions" />
+
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/edit_trip_notes_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="30dp"
+        app:layout_constraintTop_toBottomOf="@id/edit_trip_name_layout"
+        app:layout_constraintBottom_toTopOf="@id/edit_trip_wheel_circumference_layout"
+        app:layout_constraintStart_toStartOf="parent"
+        android:hint="Notes">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/edit_trip_notes"
+            android:layout_width="match_parent"
+            android:layout_height="150dp"
+            android:gravity="start|top"
+            android:ems="10"
+            android:inputType="textMultiLine" />
+
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/edit_trip_wheel_circumference_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="30dp"
+        app:layout_constraintTop_toBottomOf="@id/edit_trip_notes_layout"
+        app:layout_constraintStart_toStartOf="parent"
+        android:hint="Wheel circumference (in or mm)">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/edit_trip_wheel_circumference"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ems="10"
+            android:inputType="numberDecimal" />
+
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.textfield.TextInputLayout
+        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+        android:id="@+id/edit_trip_bike_spinner_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="30dp"
+        app:layout_constraintTop_toBottomOf="@id/edit_trip_wheel_circumference_layout"
+        app:layout_constraintStart_toStartOf="parent"
+        android:hint="Bike">
+
+        <AutoCompleteTextView
+            android:id="@+id/edit_trip_spinner_bike_select"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:inputType="none" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

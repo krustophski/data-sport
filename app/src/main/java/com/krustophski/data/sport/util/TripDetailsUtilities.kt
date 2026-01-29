@@ -1,0 +1,242 @@
+package com.krustophski.data.sport.util
+
+import android.content.Context
+import android.util.Log
+import com.krustophski.data.sport.Measurements
+import com.krustophski.data.sport.Trip
+import com.krustophski.data.sport.accumulateTime
+import com.krustophski.data.sport.data.CadenceSpeedMeasurement
+import com.krustophski.data.sport.getRpm
+import com.krustophski.data.sport.getUserSpeed
+import com.krustophski.data.sport.validateSpeed
+import com.krustophski.data.sport.widgets.Entry
+
+private const val logTag = "TripDetailsUtilities"
+
+fun useBleSpeedData(
+    speedMeasurements: Array<CadenceSpeedMeasurement>,
+    locationMeasurements: Array<Measurements>
+): Boolean {
+    Log.d(logTag, "useBleSpeedData")
+
+    if (speedMeasurements.isEmpty()) return false
+    if (locationMeasurements.isEmpty()) return true
+    Log.d(logTag, "Passed empty checks")
+
+    val bleDuration = speedMeasurements.last().timestamp - speedMeasurements.first().timestamp
+    Log.d(logTag, "size check ${speedMeasurements.size.toFloat() / bleDuration}")
+
+    if (speedMeasurements.size.toFloat() / bleDuration < 0.0001) return false
+    Log.d(logTag, "Passed size check")
+
+    val gpsDuration = locationMeasurements.last().time - locationMeasurements.first().time
+    Log.d(logTag, "Duration check: ${bleDuration.toFloat() / gpsDuration.toFloat()}")
+
+    if (bleDuration.toFloat() / gpsDuration.toFloat() < 0.9) return false
+    Log.d(logTag, "Passed duration check")
+
+    return true
+}
+
+/*fun formatRawTrendLineData(
+    resources: Resources,
+    entries: ArrayList<Entry>,
+    trend: ArrayList<Entry>
+): Pair<LineDataSet, LineDataSet> {
+    val dataset = LineDataSet(entries, "Speed")
+    dataset.setDrawCircles(false)
+    dataset.setDrawValues(false)
+    val trendData = LineDataSet(trend, "Trend")
+    trendData.setDrawCircles(false)
+    trendData.setDrawValues(false)
+    dataset.color =
+        ResourcesCompat.getColor(
+            resources,
+            R.color.secondaryGraphColor,
+            null
+        )
+    dataset.lineWidth = 10f
+    trendData.color =
+        ResourcesCompat.getColor(
+            resources,
+            R.color.accentColor,
+            null
+        )
+    trendData.lineWidth = 3f
+    return Pair(dataset, trendData)
+}*/
+
+val getSpeedDataFromSensor: (
+    context: Context,
+    overview: Trip,
+    effectiveCircumference: Float?,
+    measurementsList: Array<CadenceSpeedMeasurement>,
+    intervals: Array<LongRange>,
+    avgSpeed: Float
+) -> (
+    entries: ArrayList<Entry>,
+    trend: ArrayList<Entry>,
+    hi: ArrayList<Entry>,
+    lo: ArrayList<Entry>,
+) -> kotlin.Unit =
+    { context, overview, effectiveCircumference, measurementsList, intervals, avgSpeed ->
+        { entries, trend, hi, lo ->
+            val circumference =
+                effectiveCircumference ?: overview.autoWheelCircumference
+                ?: overview.userWheelCircumference
+            Log.d(logTag, "Using circumference: $circumference")
+
+            val intervalStart = intervals.last().first
+            val accumulatedTime = accumulateTime(intervals)
+            var trendLast =
+                getUserSpeed(
+                    context,
+                    measurementsList[0].rpm?.times(circumference!!)?.div(60)?.toDouble() ?: 0.0
+                )
+            var hiLast: Float? = null
+            var loLast: Float? = null
+            var trendAlpha = 0.5f
+            var lastMeasurement: CadenceSpeedMeasurement? = null
+
+            measurementsList.forEach { measurements ->
+                lastMeasurement
+                    ?.let { last ->
+                        if (validateSpeed(measurements, last)) {
+                            try {
+                                getRpm(
+                                    rev = measurements.revolutions,
+                                    revLast = last.revolutions,
+                                    time = measurements.lastEvent,
+                                    timeLast = last.lastEvent,
+                                    delta = measurements.timestamp - last.timestamp
+                                ).takeIf { it.isFinite() && last.rpm != 0f }
+                                    ?.let { getUserSpeed(context, it * circumference!! / 60) }
+                                    ?.let { speed ->
+                                        val timestamp =
+                                            (accumulatedTime + (measurements.timestamp - intervalStart) / 1e3).toFloat()
+                                        entries.add(Entry(timestamp, speed))
+                                        getTrendData(
+                                            speed,
+                                            trendAlpha,
+                                            avgSpeed,
+                                            trendLast,
+                                            hiLast,
+                                            loLast
+                                        ).let { (trendNew, hiNew, loNew) ->
+                                            trend.add(Entry(timestamp, trendNew))
+                                            trendLast = trendNew
+                                            hiNew?.let {
+                                                hi.add(Pair(timestamp, it))
+                                                hiLast = it
+                                            }
+                                            loNew?.let {
+                                                lo.add(Pair(timestamp, it))
+                                                loLast = it
+                                            }
+                                        }
+                                        if (trendAlpha > 0.01f) trendAlpha -= 0.005f
+                                        if (trendAlpha < 0.01f) trendAlpha = 0.01f
+                                    }
+                            } catch (e: Exception) {
+                                Log.e(
+                                    logTag,
+                                    "Could not calculate speed for time ${measurements.timestamp}"
+                                )
+                            }
+                        }
+                    }
+                lastMeasurement = measurements
+            }
+        }
+    }
+
+val getSpeedDataFromGps: (
+    context: Context,
+    measurements: Array<Measurements>,
+    intervals: Array<LongRange>,
+    avgSpeed: Float,
+) -> (
+    entries: ArrayList<Entry>,
+    trend: ArrayList<Entry>,
+    hi: ArrayList<Entry>,
+    lo: ArrayList<Entry>,
+) -> kotlin.Unit = { context, measurements, intervals, avgSpeed ->
+    { entries, trend, hi, lo ->
+        Log.v(logTag, "getSpeedFromGps")
+        val intervalStart = intervals.last().first
+        val accumulatedTime = accumulateTime(intervals)
+        var trendLast =
+            getUserSpeed(context, measurements[0].speed.toDouble())
+        val trendAlpha = 0.01f
+        var hiLast: Float? = null
+        var loLast: Float? = null
+
+        measurements.forEach { measurement ->
+            Log.v(logTag, "GPS speed: ${measurement.speed}")
+            val speed = getUserSpeed(
+                context,
+                measurement.speed.toDouble()
+            )
+            val timestamp =
+                (accumulatedTime + (measurement.time - intervalStart) / 1e3).toFloat()
+            entries.add(Entry(timestamp, speed))
+            getTrendData(
+                speed,
+                trendAlpha,
+                avgSpeed,
+                trendLast,
+                hiLast,
+                loLast
+            ).let { (trendNew, hiNew, loNew) ->
+                trend.add(Entry(timestamp, trendNew))
+                trendLast = trendNew
+                hiNew?.let {
+                    hi.add(Pair(timestamp, it))
+                    hiLast = it
+                }
+                loNew?.let {
+                    lo.add(Pair(timestamp, it))
+                    loLast = it
+                }
+            }
+        }
+    }
+}
+
+fun getTrendData(
+    yValue: Float,
+    alpha: Float,
+    average: Float,
+    trendLast: Float?,
+    hiLast: Float?,
+    loLast: Float?
+): Triple<Float, Float?, Float?> {
+    var hi: Float? = null
+    var lo: Float? = null
+    val alpha2: Float
+    val alphaHi = 1f
+    val alphaLo = 0.02f
+    val trend =
+        (alpha * yValue) + ((1 - alpha) * (trendLast
+            ?: yValue))
+    if (yValue >= average) {
+        alpha2 = when (yValue > (hiLast ?: average)) {
+            true -> alphaHi
+            else -> alphaLo
+        }
+        hi = (alpha2 * yValue) + ((1 - alpha2) * (hiLast
+            ?: yValue))
+    } else {
+        alpha2 = when (yValue < (loLast ?: average)) {
+            true -> alphaHi
+            else -> alphaLo
+        }
+        lo = (alpha2 * yValue) + ((1 - alpha2) * (loLast
+            ?: yValue))
+    }
+    return Triple(
+        trend,
+        hi,
+        lo
+    )
+}

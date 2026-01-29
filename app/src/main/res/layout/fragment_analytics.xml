@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:paddingHorizontal="5dp"
+    tools:context=".AnalyticsFragment">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <LinearLayout
+            android:id="@+id/fragmentAnalytics_topLinearLayout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="50dp">
+
+            <com.krustophski.data.sport.RollupView
+                android:id="@+id/trips_rollup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_margin="10dp" />
+
+            <TextView
+                android:id="@+id/fragmentAnalytics_spotlightRideHeading"
+                style="@style/TextAppearance.AppCompat.CardHeading"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="15dp"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="6dp"
+                android:text="SPOTLIGHT RIDE"
+                android:visibility="gone" />
+
+            <com.krustophski.data.sport.TripSummaryCard
+                android:id="@+id/fragmentAnalytics_spotlightRide"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="10dp"
+                android:layout_marginBottom="20dp"
+                android:visibility="gone"
+                app:cardCornerRadius="8dp"
+                app:contentPadding="0dp" />
+
+            <TextView
+                style="@style/TextAppearance.AppCompat.CardHeading"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="15dp"
+                android:layout_marginTop="10dp"
+                android:layout_marginBottom="6dp"
+                android:text="RECENTLY" />
+
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="10dp"
+                android:layout_marginBottom="20dp"
+                app:cardCornerRadius="8dp"
+                app:contentPadding="10dp">
+
+                <include layout="@layout/fragment_weekly_summary" />
+            </androidx.cardview.widget.CardView>
+
+            <com.krustophski.data.sport.widgets.AnalyticsCard
+                android:id="@+id/fragmentAnalytics_analyticsCard_thisMonth"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="10dp"
+                android:layout_marginBottom="20dp"
+                app:cardCornerRadius="8dp"
+                app:contentPadding="10dp" />
+
+            <com.krustophski.data.sport.widgets.AnalyticsCard
+                android:id="@+id/fragmentAnalytics_analyticsCard_thisYear"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="10dp"
+                android:layout_marginBottom="20dp"
+                app:cardCornerRadius="8dp"
+                app:contentPadding="10dp" />
+
+            <TextView
+                style="@style/TextAppearance.AppCompat.CardHeading"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="15dp"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="6dp"
+                android:text="PERSONAL RECORDS" />
+
+            <LinearLayout
+                android:id="@+id/fragmentAnalytics_prLinearLayout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+            <com.krustophski.data.sport.widgets.AnalyticsCard
+                android:id="@+id/fragmentAnalytics_analyticsCard_topWeeks"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="10dp"
+                android:layout_marginBottom="20dp"
+                app:cardCornerRadius="8dp"
+                app:contentPadding="10dp" />
+
+            <com.krustophski.data.sport.widgets.AnalyticsCard
+                android:id="@+id/fragmentAnalytics_analyticsCard_topMonths"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="10dp"
+                android:layout_marginBottom="20dp"
+                app:cardCornerRadius="8dp"
+                app:contentPadding="10dp" />
+
+            <com.krustophski.data.sport.widgets.AnalyticsCard
+                android:id="@+id/fragmentAnalytics_analyticsCard_longestRides"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="10dp"
+                android:layout_marginBottom="20dp"
+                app:cardCornerRadius="8dp"
+                app:contentPadding="10dp" />
+
+        </LinearLayout>
+    </ScrollView>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

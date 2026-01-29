@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen  xmlns:app="http://schemas.android.com/apk/res-auto">
+    <SwitchPreference
+        app:key="@string/preferences_key_advanced_onboard_sensors"
+        app:title="Onboard sensors"
+        app:summary="Collect data from onboard sensors. This will significantly increase the amount of data stored by Cyclotrack. Nothing is done with this data at this time, but it may be used for analysis in the future."
+        app:defaultValue="true" />
+    <SwitchPreference
+        app:key="@string/preferences_key_advanced_use_vo2max_calorie_estimate"
+        app:title="Use VO2Max based calorie estimates"
+        app:summary="VO2Max estimates are roughly 25% higher than the cycling specific estimate used by default."
+        app:defaultValue="false" />
+    <SwitchPreference
+        app:key="@string/preference_key_useAutoCircumference"
+        app:title="@string/switch_preference_useAutoCircumference_title"
+        app:summary="@string/switch_preference_useAutoCircumference_description"
+        app:defaultValue="false" />
+    <Preference
+        app:key="@string/preference_key_advanced_export_sensors_log"
+        app:title="Sensor log"
+        app:summary="Export latest trip data (includes onboard sensor log) to Downloads" />
+</PreferenceScreen>

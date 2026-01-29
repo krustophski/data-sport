@@ -1,0 +1,7 @@
+<resources>
+
+    <style name="Widget.AppTheme.WeeklySummaryTable" parent="">
+        <item name="android:background">#000</item>
+        <item name="exampleColor">#0aa</item>
+    </style>
+</resources>

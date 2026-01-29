@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="accentColor">#ff88ff</color>
+    <color name="secondaryGraphColor">#4E154E</color>
+    <color name="secondaryColor">#a500a5</color>
+    <color name="secondaryLightColor">#da4dd7</color>
+    <color name="secondaryDarkColor">#720075</color>
+    <color name="primaryColor">#ff88ff</color>
+    <color name="primaryLightColor">#ffbbff</color>
+    <color name="primaryDarkColor">#ca56cb</color>
+    <color name="secondaryTextColor">#ffffff</color>
+    <color name="primaryTextColor">#000000</color>
+</resources>

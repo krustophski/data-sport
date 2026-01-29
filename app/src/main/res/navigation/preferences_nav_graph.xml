@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/preferences_nav_graph"
+    app:startDestination="@id/AppPreferencesFragment">
+
+    <fragment
+        android:id="@+id/AppPreferencesFragment"
+        android:name="com.krustophski.data.sport.AppPreferencesFragment"
+        android:label="Preferences"
+        tools:layout="@layout/fragment_app_preferences">
+        <action
+            android:id="@+id/action_set_dashboard_safe_zone"
+            app:destination="@id/DashboardSafeZonePreferenceActivity" />
+        <action
+            android:id="@+id/action_edit_bike_specs"
+            app:destination="@id/BikeSpecsPreferenceFragment" />
+        <action
+            android:id="@+id/action_advanced_preferences"
+            app:destination="@id/AdvancedPreferencesFragment" />
+        <action
+            android:id="@+id/action_autopause_preferences"
+            app:destination="@id/AutoPausePreferencesFragment" />
+        <action
+            android:id="@+id/action_show_linked_sensors"
+            app:destination="@id/LinkedSensorFragment" />
+    </fragment>
+    <activity
+        android:id="@+id/DashboardSafeZonePreferenceActivity"
+        android:name="com.krustophski.data.sport.preferences.DashboardSafeZonePreferenceActivity"
+        android:label="Dashboard Safe Zone"
+        tools:layout="@layout/activity_dashboard_safe_zone_preference" />
+    <fragment
+        android:id="@+id/AdvancedPreferencesFragment"
+        android:name="com.krustophski.data.sport.preferences.AdvancedPreferencesFragment"
+        android:label="Advanced Preferences"
+        tools:layout="@layout/fragment_advanced_preferences" />
+    <fragment
+        android:id="@+id/AutoPausePreferencesFragment"
+        android:name="com.krustophski.data.sport.preferences.AutoPausePreferencesFragment"
+        android:label="Auto-pause Preferences"
+        tools:layout="@layout/fragment_autopause_preferences" />
+    <fragment
+        android:id="@+id/LinkedSensorFragment"
+        android:name="com.krustophski.data.sport.LinkedSensorsFragment"
+        android:label="Linked Sensors"
+        tools:layout="@layout/fragment_linked_sensors">
+        <action
+            android:id="@+id/action_link_bike_sensors"
+            app:destination="@id/SensorDiscoveryFragment" />
+        <action
+            android:id="@+id/action_link_body_sensors"
+            app:destination="@id/SensorDiscoveryFragment" />
+    </fragment>
+    <fragment
+        android:id="@+id/SensorDiscoveryFragment"
+        android:name="com.krustophski.data.sport.DiscoverSensorFragment"
+        android:label="Sensor Discovery"
+        tools:layout="@layout/fragment_sensor_discovery">
+        <argument
+            android:name="bikeId"
+            android:defaultValue="0L"
+            app:argType="long" />
+        <argument
+            android:name="bikeName"
+            android:defaultValue="Body"
+            app:argType="string" />
+    </fragment>
+    <fragment
+        android:id="@+id/BikeSpecsPreferenceFragment"
+        android:name="com.krustophski.data.sport.BikeSpecsPreferenceFragment"
+        android:label="Bike Specs"
+        tools:layout="@layout/fragment_bike_specs_preference">
+        <action
+            android:id="@+id/action_link_sensors_to_bike"
+            app:destination="@id/SensorDiscoveryFragment" />
+    </fragment>
+</navigation>

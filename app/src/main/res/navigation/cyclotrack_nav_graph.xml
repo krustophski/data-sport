@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/cyclotrack_nav_graph"
+    app:startDestination="@id/AnalyticsFragment">
+
+    <activity
+        android:id="@+id/PreferencesActivity"
+        android:name="com.krustophski.data.sport.PreferencesActivity"
+        android:label="Preferences Activity"
+        android:layout="@layout/activity_preferences" />
+    <activity
+        android:id="@+id/DashboardActivity"
+        android:name="com.krustophski.data.sport.DashboardActivity"
+        android:label="Dashboard Activity"
+        android:layout="@layout/activity_dashboard" />
+    <activity
+        android:id="@+id/TripDetailsActivity"
+        android:name="com.krustophski.data.sport.TripDetailsActivity"
+        android:label="Trip Details Activity"
+        tools:layout="@layout/activity_trip_details" />
+    <fragment
+        android:id="@+id/AnalyticsFragment"
+        android:name="com.krustophski.data.sport.AnalyticsFragment"
+        android:label="Analytics"
+        tools:layout="@layout/fragment_analytics">
+        <action
+            android:id="@+id/action_start_trip"
+            app:destination="@id/DashboardActivity">
+            <argument
+                android:name="tripId"
+                android:defaultValue="-1L"
+                app:argType="long" />
+        </action>
+        <action
+            android:id="@+id/action_view_trip_details"
+            app:destination="@id/TripDetailsActivity">
+            <argument
+                android:name="tripId"
+                android:defaultValue="-1L"
+                app:argType="long" />
+        </action>
+    </fragment>
+    <fragment
+        android:id="@+id/TripSummariesFragment"
+        android:name="com.krustophski.data.sport.TripSummariesFragment"
+        android:label="@string/trip_summaries_fragment_label"
+        tools:layout="@layout/fragment_trip_summaries">
+
+        <action
+            android:id="@+id/action_start_trip"
+            app:destination="@id/DashboardActivity">
+            <argument
+                android:name="tripId"
+                android:defaultValue="-1L"
+                app:argType="long" />
+        </action>
+        <action
+            android:id="@+id/action_view_trip_details"
+            app:destination="@id/TripDetailsActivity">
+            <argument
+                android:name="tripId"
+                android:defaultValue="-1L"
+                app:argType="long" />
+        </action>
+    </fragment>
+    <fragment
+        android:id="@+id/BiometricsPreferenceFragment"
+        android:name="com.krustophski.data.sport.BiometricsPreferenceFragment"
+        android:label="Biometrics"
+        tools:layout="@layout/fragment_biometrics_preference">
+        <action
+            android:id="@+id/action_go_to_settings"
+            app:destination="@id/PreferencesActivity" />
+    </fragment>
+</navigation>

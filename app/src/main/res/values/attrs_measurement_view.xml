@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <declare-styleable name="ValueAttrs">
+        <attr name="value" format="string" />
+    </declare-styleable>
+    <declare-styleable name="MeasurementView">
+        <attr name="textSize" format="dimension" />
+        <attr name="value" />
+        <attr name="label" format="string" />
+        <attr name="autoShrinkText" format="boolean" />
+    </declare-styleable>
+</resources>

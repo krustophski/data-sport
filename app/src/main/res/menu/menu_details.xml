@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/details_menu_action_edit"
+        android:icon="@drawable/ic_edit_black_24"
+        android:title="@string/details_menu_title_edit"
+        app:showAsAction="ifRoom" />
+    <item
+        android:id="@+id/details_menu_action_delete"
+        android:title="@string/details_menu_title_delete"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/details_menu_action_export_xlsx"
+        android:title="@string/details_menu_title_export_xlsx"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/details_menu_action_export_fit"
+        android:title="@string/details_menu_title_export_fit"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/details_menu_action_sync"
+        android:title="@string/details_menu_title_sync"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/details_menu_action_unsync"
+        android:title="@string/details_menu_title_unsync"
+        android:visible="false"
+        app:showAsAction="never" />
+</menu>

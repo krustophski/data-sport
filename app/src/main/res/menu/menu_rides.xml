@@ -1,0 +1,31 @@
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:context="com.krustophski.data.sport.MainActivity">
+    <item
+        android:id="@+id/action_clear_multiselect"
+        android:orderInCategory="1"
+        android:title="@string/action_clear_multiselect"
+        android:icon="@drawable/baseline_undo_24"
+        android:visible="false"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/action_stitch"
+        android:orderInCategory="101"
+        android:title="@string/action_stitch"
+        android:icon="@drawable/baseline_merge_type_24"
+        android:visible="false"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/action_delete"
+        android:orderInCategory="102"
+        android:title="@string/action_delete"
+        android:icon="@drawable/baseline_delete_sweep_24"
+        android:visible="false"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/action_cleanup"
+        android:orderInCategory="200"
+        android:title="@string/action_cleanup"
+        app:showAsAction="never" />
+</menu>
